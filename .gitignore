@@ -1,0 +1,18 @@
+# Environment secrets
+.env
+
+# Log output
+/logs/
+
+# Build output
+/bin/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
