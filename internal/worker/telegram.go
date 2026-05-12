@@ -90,6 +90,9 @@ func (t *TelegramNotifier) Handle(ctx context.Context, event model.LogEvent) err
 	return nil
 }
 
+// telegramMaxMessageLength is the maximum number of characters allowed in a single Telegram message.
+const telegramMaxMessageLength = 4096
+
 // scheduleFlush waits for the remaining throttle duration, then flushes all pending events.
 func (t *TelegramNotifier) scheduleFlush(ctx context.Context, wait time.Duration) {
 	if wait > 0 {
@@ -110,21 +113,27 @@ func (t *TelegramNotifier) scheduleFlush(ctx context.Context, wait time.Duration
 		return
 	}
 
-	msg := t.formatBatchMessage(events)
-	if err := t.send(ctx, msg); err != nil {
-		log.Printf("[telegram] failed to send batched message: %v", err)
+	messages := t.buildMessages(events)
+	for i, msg := range messages {
+		if err := t.send(ctx, msg); err != nil {
+			log.Printf("[telegram] failed to send message %d/%d: %v", i+1, len(messages), err)
+		}
 	}
 }
 
-// formatBatchMessage creates a single Telegram message summarizing multiple DDoS events.
-func (t *TelegramNotifier) formatBatchMessage(events []model.LogEvent) string {
+// buildMessages splits events into one or more Telegram messages, each under the 4096 char limit.
+func (t *TelegramNotifier) buildMessages(events []model.LogEvent) []string {
 	if len(events) == 1 {
-		return events[0].FormatTelegramMessage()
+		return []string{events[0].FormatTelegramMessage()}
 	}
 
-	msg := fmt.Sprintf("🚨 *%d DDoS Alerts Detected*\n\n", len(events))
+	var messages []string
+	header := fmt.Sprintf("🚨 *%d DDoS Alerts Detected*\n\n", len(events))
+	current := header
+	count := 0
+
 	for i, e := range events {
-		msg += fmt.Sprintf(
+		entry := fmt.Sprintf(
 			"*#%d* — `%s`\n🖥️ `%s` | 🏷️ `%s`\n```\n%s\n```\n\n",
 			i+1,
 			e.Timestamp.Format(time.RFC3339),
@@ -132,8 +141,24 @@ func (t *TelegramNotifier) formatBatchMessage(events []model.LogEvent) string {
 			model.EscapeMarkdown(e.Tag),
 			model.EscapeMarkdown(e.Content),
 		)
+
+		// If adding this entry would exceed the limit, flush current message and start a new one.
+		if len(current)+len(entry) > telegramMaxMessageLength && count > 0 {
+			messages = append(messages, current)
+			current = "🚨 *DDoS Alerts (continued)*\n\n"
+			count = 0
+		}
+
+		current += entry
+		count++
 	}
-	return msg
+
+	// Append the last chunk.
+	if count > 0 {
+		messages = append(messages, current)
+	}
+
+	return messages
 }
 
 // send posts a message to the Telegram Bot API.
