@@ -3,6 +3,7 @@ package model
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -46,6 +47,7 @@ func (e LogEvent) FormatLogLine() string {
 }
 
 // FormatTelegramMessage returns a Markdown-formatted message for Telegram notifications.
+// Special characters in dynamic content are escaped to prevent Telegram API parse errors.
 func (e LogEvent) FormatTelegramMessage() string {
 	return fmt.Sprintf(
 		"🚨 *DDoS Alert Detected*\n\n"+
@@ -54,8 +56,20 @@ func (e LogEvent) FormatTelegramMessage() string {
 			"🏷️ *Tag:* `%s`\n"+
 			"📝 *Details:*\n```\n%s\n```",
 		e.Timestamp.Format(time.RFC3339),
-		e.Hostname,
-		e.Tag,
-		e.Content,
+		EscapeMarkdown(e.Hostname),
+		EscapeMarkdown(e.Tag),
+		EscapeMarkdown(e.Content),
 	)
+}
+
+// EscapeMarkdown escapes special characters that break Telegram's Markdown (v1) parser.
+// Characters: _ * ` [
+func EscapeMarkdown(s string) string {
+	replacer := strings.NewReplacer(
+		"_", "\\_",
+		"*", "\\*",
+		"`", "\\`",
+		"[", "\\[",
+	)
+	return replacer.Replace(s)
 }

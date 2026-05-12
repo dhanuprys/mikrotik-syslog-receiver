@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"sync"
@@ -127,9 +128,9 @@ func (t *TelegramNotifier) formatBatchMessage(events []model.LogEvent) string {
 			"*#%d* — `%s`\n🖥️ `%s` | 🏷️ `%s`\n```\n%s\n```\n\n",
 			i+1,
 			e.Timestamp.Format(time.RFC3339),
-			e.Hostname,
-			e.Tag,
-			e.Content,
+			model.EscapeMarkdown(e.Hostname),
+			model.EscapeMarkdown(e.Tag),
+			model.EscapeMarkdown(e.Content),
 		)
 	}
 	return msg
@@ -162,7 +163,9 @@ func (t *TelegramNotifier) send(ctx context.Context, text string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("telegram API returned status %d", resp.StatusCode)
+		respBody, _ := io.ReadAll(resp.Body)
+		log.Printf("[telegram] API error response (status %d): %s", resp.StatusCode, string(respBody))
+		return fmt.Errorf("telegram API returned status %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	log.Printf("[telegram] message sent successfully to chat %s", t.chatID)
