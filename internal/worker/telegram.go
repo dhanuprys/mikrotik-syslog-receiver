@@ -124,7 +124,8 @@ func (t *TelegramNotifier) scheduleFlush(ctx context.Context, wait time.Duration
 // buildMessages splits events into one or more Telegram messages, each under the 4096 char limit.
 func (t *TelegramNotifier) buildMessages(events []model.LogEvent) []string {
 	if len(events) == 1 {
-		return []string{events[0].FormatTelegramMessage()}
+		msg := events[0].FormatTelegramMessage()
+		return []string{truncateMessage(msg)}
 	}
 
 	var messages []string
@@ -133,17 +134,21 @@ func (t *TelegramNotifier) buildMessages(events []model.LogEvent) []string {
 	count := 0
 
 	for i, e := range events {
+		// Truncate long content to prevent any single entry from blowing the limit.
+		content := model.EscapeMarkdown(e.Content)
+		content = truncateContent(content, 500)
+
 		entry := fmt.Sprintf(
 			"*#%d* — `%s`\n🖥️ `%s` | 🏷️ `%s`\n```\n%s\n```\n\n",
 			i+1,
 			e.Timestamp.Format(time.RFC3339),
 			model.EscapeMarkdown(e.Hostname),
 			model.EscapeMarkdown(e.Tag),
-			model.EscapeMarkdown(e.Content),
+			content,
 		)
 
 		// If adding this entry would exceed the limit, flush current message and start a new one.
-		if len(current)+len(entry) > telegramMaxMessageLength && count > 0 {
+		if runeLen(current)+runeLen(entry) > telegramMaxMessageLength && count > 0 {
 			messages = append(messages, current)
 			current = "🚨 *DDoS Alerts (continued)*\n\n"
 			count = 0
@@ -159,6 +164,30 @@ func (t *TelegramNotifier) buildMessages(events []model.LogEvent) []string {
 	}
 
 	return messages
+}
+
+// truncateContent trims content to maxRunes and appends an ellipsis if it was truncated.
+func truncateContent(s string, maxRunes int) string {
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return string(runes[:maxRunes]) + "\n... (truncated)"
+}
+
+// truncateMessage ensures a fully formatted message does not exceed the Telegram limit.
+func truncateMessage(msg string) string {
+	runes := []rune(msg)
+	if len(runes) <= telegramMaxMessageLength {
+		return msg
+	}
+	// Trim and close any open code block.
+	return string(runes[:telegramMaxMessageLength-20]) + "\n```\n_...(truncated)_"
+}
+
+// runeLen returns the character count (not byte count) of a string.
+func runeLen(s string) int {
+	return len([]rune(s))
 }
 
 // send posts a message to the Telegram Bot API.
